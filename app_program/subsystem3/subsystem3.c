@@ -84,16 +84,19 @@ EXPORT ER subsystem3_init(void)
 
 EXPORT ER subsystem3_start(void)
 {
-	/* Both on core 0 (TP_PRC1): line_task produces barcode runs that
+	/* Both on core 1 (TP_PRC2): line_task produces barcode runs that
 	   barcode_task consumes; keeping them on one core keeps their
-	   order simple.  Change by team agreement (TEAM.md section 4). */
-	tid_s3_barcode = app_start_task(barcode_task, S3_PRI_BARCODE, TP_PRC1,
+	   order simple.  Not core 0: the USB console (pri 3) and CYW43
+	   (pri 4) service tasks are pinned there, and on the bench they
+	   starved line_task (READY, 90 loops in ~15 s).  Core 1 holds only
+	   motion_task (14) and imu_task (18).  TEAM.md section 4. */
+	tid_s3_barcode = app_start_task(barcode_task, S3_PRI_BARCODE, TP_PRC2,
 					"barcode_task");
 	if (tid_s3_barcode < E_OK) {
 		return tid_s3_barcode;
 	}
 
-	tid_s3_line = app_start_task(line_task, S3_PRI_LINE, TP_PRC1,
+	tid_s3_line = app_start_task(line_task, S3_PRI_LINE, TP_PRC2,
 				     "line_task");
 	if (tid_s3_line < E_OK) {
 		return tid_s3_line;

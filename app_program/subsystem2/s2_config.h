@@ -30,8 +30,8 @@
 #define S2_PIN_ENC_R		3
 
 /* Set to 1 if a wheel turns backwards for a forward command */
-#define S2_MOTOR_L_INVERT	0
-#define S2_MOTOR_R_INVERT	0
+#define S2_MOTOR_L_INVERT	1	/* bench 2026-10-15: both wheels ran backwards */
+#define S2_MOTOR_R_INVERT	1
 
 /* ---------------------------------------------------------------------
  *  Geometry                                                    MEASURE

@@ -32,8 +32,11 @@ LOCAL BOOL		calibrating;
 LOCAL UW		cal_start_ms;
 LOCAL UB		bc_level;	/* barcode sensor: 1 = black */
 LOCAL UW		bc_run_start_us;
-LOCAL UW		overruns;	/* periods missed (task too slow) */
-LOCAL UW		read_errors;
+EXPORT UW		s3_line_overruns;	/* periods missed (task too slow) */
+EXPORT UW		s3_line_read_errors;
+EXPORT UW		s3_line_wakeups;	/* times the loop ran */
+#define overruns	s3_line_overruns
+#define read_errors	s3_line_read_errors
 
 /* Cyclic handler: interrupt context, keep it this short */
 EXPORT void s3_line_cyclic(void *exinf)
@@ -162,6 +165,7 @@ EXPORT void line_task(INT stacd, void *exinf)
 
 	while (1) {
 		tk_slp_tsk(TMO_FEVR);		/* woken by s3_line_cyclic */
+		s3_line_wakeups++;
 		if (tk_can_wup(TSK_SELF) > 0) {
 			overruns++;		/* a period was missed */
 		}

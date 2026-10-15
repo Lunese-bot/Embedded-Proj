@@ -8,6 +8,7 @@
  */
 
 #include "subsystem4.h"
+#include "drv_lsm303.h"
 #include "imu_selftest.h"
 #include "../test_report.h"
 
@@ -33,9 +34,15 @@ EXPORT void subsystem4_test(void)
 	TEST_CHECK("S4-U02", s4_get_status(&st) == E_OK,
 		   "s4_get_status() returns E_OK");
 
+	/* Bring-up aid: list what answers on I2C0 */
+	(void)lsm303_scan();
+
 	/* S4-U03: sensor present and calibrated (cal takes 1 s) */
 	tk_dly_tsk(1500);
 	s4_get_status(&st);
+	tm_printf((UB*)"[TEST] S4-U03 info: state %d calibrated %d i2c errors %d"
+		  " az %d mg\n", (INT)st.state, (INT)st.calibrated,
+		  (INT)s4_i2c_errors, (INT)st.az_mg);
 	TEST_CHECK("S4-U03", st.calibrated && st.state != IMU_ST_ERROR,
 		   "LSM303DLHC answers and calibration completes");
 
@@ -50,6 +57,8 @@ EXPORT void subsystem4_test(void)
 	before = st.sample_count;
 	tk_dly_tsk(1000);
 	s4_get_status(&st);
+	tm_printf((UB*)"[TEST] S4-U05 info: %d samples in 1 s, overruns %d\n",
+		  (INT)(st.sample_count - before), (INT)s4_overruns);
 	TEST_CHECK("S4-U05",
 		   st.sample_count - before >= 48 &&
 		   st.sample_count - before <= 52 && s4_overruns == 0,

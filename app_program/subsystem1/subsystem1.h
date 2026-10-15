@@ -35,6 +35,9 @@
 #define S1_PERIOD_MS		200
 #define S1_LINE_MAX		S1_BRIDGE_LINE_MAX	/* topic + payload */
 #define S1_QUEUE_LINES		8
+#define S1_CONSOLE_EVERY	5	/* also print telemetry on the console every
+				   5 x 200 ms = 1 s while MQTT is not
+				   connected (read by tools/dashboard.html) */
 
 /* IF-T1: queue one message for MQTT.  topic is the suffix after
    S1_TOPIC_ROOT ("event", "telemetry", "fault", ...).  Never blocks;

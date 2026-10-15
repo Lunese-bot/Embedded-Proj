@@ -88,6 +88,8 @@ EXPORT void subsystem5_test(void)
 
 	/* Needs the sensor: hold a flat object 20-30 cm in front */
 	mm = st.last_distance_mm;
+	tm_printf((UB*)"[TEST] S5-U11 info: last distance %d mm, %d pings\n",
+		  (INT)mm, (INT)st.pings);
 	TEST_CHECK("S5-U11", mm == US_NO_ECHO || (mm > 20 && mm < 2000),
 		   "last distance is 'no echo' or in sensor range");
 

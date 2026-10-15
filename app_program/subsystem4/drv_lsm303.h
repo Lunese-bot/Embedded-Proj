@@ -1,6 +1,6 @@
 /*
  *	drv_lsm303.h
- *	Subsystem 4 -- LSM303DLHC accelerometer + magnetometer driver.
+ *	Subsystem 4 -- LSM303DLHC (or LSM303D, auto-detected) accel + mag driver.
  *
  *	Uses the kernel's own I2C driver ("iica" = I2C0) through the
  *	micro T-Kernel device API (tk_opn_dev / tk_swri_dev).
@@ -38,5 +38,6 @@ IMPORT ER	lsm303_read(LSM303_RAW *raw);
 
 /* Close the device (used before a full re-init) */
 IMPORT void	lsm303_close(void);
+IMPORT INT	lsm303_scan(void);	/* bring-up: list I2C0 devices */
 
 #endif /* DRV_LSM303_H */

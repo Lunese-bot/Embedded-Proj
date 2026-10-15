@@ -14,6 +14,7 @@
  */
 
 #include "subsystem3.h"
+#include "../subsystem6/subsystem6.h"	/* tid_vc: paused during S3-U05 */
 #include "code39.h"
 #include "line_algo.h"
 #include "../test_report.h"
@@ -98,6 +99,21 @@ EXPORT void subsystem3_test(void)
 	s3_get_line_status(&st1);
 	tk_dly_tsk(500);
 	s3_get_line_status(&st2);
+	{
+		IMPORT UW	s3_line_overruns, s3_line_read_errors, s3_line_wakeups;
+		T_RTSK		rt;
+		T_RCYC		rc;
+		ER		e1, e2;
+
+		e1 = tk_ref_tsk(tid_s3_line, &rt);
+		e2 = tk_ref_cyc(cyc_s3_line, &rc);
+		tm_printf((UB*)"[TEST] S3-U04 info: %d samples in 500 ms, loops %d,"
+			  " overruns %d, read errors %d, task stat 0x%x (er %d),"
+			  " cyc stat 0x%x (er %d)\n",
+			  (INT)(st2.seq - st1.seq), (INT)s3_line_wakeups,
+			  (INT)s3_line_overruns, (INT)s3_line_read_errors,
+			  (INT)rt.tskstat, (INT)e1, (INT)rc.cycstat, (INT)e2);
+	}
 	TEST_CHECK("S3-U04", (st2.seq - st1.seq) >= 45 && (st2.seq - st1.seq) <= 55,
 		   "line task samples every 10 ms");
 
@@ -106,6 +122,9 @@ EXPORT void subsystem3_test(void)
 	{
 		S3_BC_RUN	run;
 
+		/* The Vehicle Controller also reads mbf_s3_events (vc_bridge_s3.c)
+		   and would take these events first: pause it for this test. */
+		(void)tk_sus_tsk(tid_vc);
 		drain_events();
 		n = code39_encode("L", 20000, 50000, w, S3_BC_MAX_ELEMENTS);
 		run.black = 0; run.width_us = 500000;	/* leading quiet zone */
@@ -121,6 +140,8 @@ EXPORT void subsystem3_test(void)
 			   wait_event(S3_EVT_BARCODE_DECODED, &evt, 1000) &&
 			   evt.nav == NAV_LEFT && evt.text[0] == 'L',
 			   "BARCODE_DECODED event with NAV_LEFT");
+		drain_events();
+		(void)tk_rsm_tsk(tid_vc);
 	}
 
 	/* S3-U06 (manual, on the track): see TEST_LOG.md.  Print the live

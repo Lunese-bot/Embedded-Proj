@@ -4,7 +4,7 @@
  *
  *	Builds one JSON line from every subsystem's status and queues it for
  *	MQTT (topic robot/g10/telemetry).  Without a WiFi build (or before
- *	MQTT connects) the line is also printed every 2 s, so the same
+ *	MQTT connects) the line is also printed once a second, so the same
  *	telemetry can be checked on the console.
  *
  *	TODO(Buddy 1): agree the topic list and JSON fields with the team
@@ -67,7 +67,7 @@ EXPORT void telemetry_task(INT stacd, void *exinf)
 
 		s1_post("telemetry", (const char *)buf);
 
-		if (!s1_stat.mqtt_up && (tick % 10) == 0) {
+		if (!s1_stat.mqtt_up && (tick % S1_CONSOLE_EVERY) == 0) {
 			tm_printf((UB*)"%s\n", buf);
 		}
 	}

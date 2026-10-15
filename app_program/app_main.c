@@ -109,6 +109,20 @@ EXPORT INT usermain(void)
 	/* Test build (make TEST=1): run every subsystem's tests in turn,
 	   here in the initial task, while the system is running.  Tests may
 	   call tk_dly_tsk() to let the other tasks work for a while. */
+#if TM_CONSOLE_USB_CDC
+	{
+		/* Wait (up to 30 s) until a terminal or tools/dashboard.html
+		   opens the USB port, so the test results are not printed
+		   before anyone is listening. */
+		IMPORT int tm_tusb_connected(void);
+		INT	n;
+
+		for (n = 0; n < 300 && !tm_tusb_connected(); n++) {
+			tk_dly_tsk(100);
+		}
+		tk_dly_tsk(1000);
+	}
+#endif
 	tm_printf((UB*)"[TEST] === test run start ===\n");
 	subsystem1_test();
 	subsystem2_test();
