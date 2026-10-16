@@ -22,7 +22,7 @@
  *	  subsystem2/  Producer  makes a "sample" every 300 ms     (core 1)
  *	  subsystem3/  Consumer  collects samples into statistics  (core 0)
  *	  subsystem4/  Monitor   prints reports, pauses/resumes the LED
- *	  subsystem5/  (empty template for the fifth student)
+ *	  subsystem5/  Buddy 1 MQTT telemetry/command queues (no second network task)
  *
  *	How they talk to each other (the interfaces, see TEAM.md section 5):
  *	  IF-01  S2 -> S3  mailbox mbx_samples      (owned by S3)
@@ -49,6 +49,7 @@
  *	  alarm       tk_cre_alm tk_sta_alm tk_stp_alm                  S4
  *	  time        tk_get_tim                                        S2, S4
  *	  system      tk_ref_ver                                        app_main.c
+ *	  network     CYW43/lwIP/MQTT calls remain in cyw43_utk_task      kernel service
  *
  *	Output appears on the USB serial port (115200 8N1 in any terminal).
  */

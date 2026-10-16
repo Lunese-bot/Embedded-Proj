@@ -445,7 +445,7 @@ ifeq ($(MQTT),1)
 MQTT_CORE_OBJS := ./mtkernel_3/lwip/apps/mqtt/mqtt.o
 MQTT_PORT_OBJS := ./mtkernel_3/lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.o
 
-CFLAGS += -DTM_MQTT=1
+CFLAGS += -DTM_MQTT=1 -I"../app_program/subsystem5"
 
 OBJS += $(MQTT_CORE_OBJS) $(MQTT_PORT_OBJS)
 C_DEPS += $(MQTT_CORE_OBJS:.o=.d) $(MQTT_PORT_OBJS:.o=.d)

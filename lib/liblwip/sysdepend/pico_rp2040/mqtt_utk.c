@@ -20,17 +20,18 @@
 #include "lwip/timeouts.h"
 #include "wifi_secrets.h"
 #include "mqtt_utk.h"
+#include "buddy1_mqtt.h"
 #include <tm/tmonitor.h>
 
 #define MQTT_UTK_HEARTBEAT_MS   5000
+#define MQTT_UTK_TELEMETRY_MS   200
 #define MQTT_UTK_KEEPALIVE_S    60
 #define MQTT_UTK_RETRY_MS       3000
 
 /* Inbound message staging. A publish arrives as one topic callback followed by
  * one or more data callbacks, so the topic has to be kept until the fragment
- * carrying MQTT_DATA_FLAG_LAST shows up. Both buffers are sized well past the
- * heartbeat this demo publishes; anything longer is truncated and flagged
- * rather than being allowed to run off the end. */
+ * carrying MQTT_DATA_FLAG_LAST shows up. Oversized commands are rejected
+ * rather than being allowed to run off the end of either buffer. */
 #define MQTT_UTK_RX_TOPIC_MAX   64
 #define MQTT_UTK_RX_DATA_MAX    128
 
@@ -41,9 +42,22 @@ static u8_t		connecting;
 static char		rx_topic[MQTT_UTK_RX_TOPIC_MAX];
 static UB		rx_data[MQTT_UTK_RX_DATA_MAX];
 static u16_t		rx_len;
+static u32_t		rx_expected_len;
+static u8_t		rx_topic_truncated;
 static u8_t		rx_truncated;
 
 static void heartbeat_timeout(void *arg);
+static void telemetry_timeout(void *arg);
+
+static int topic_matches(const char *topic, const char *expected)
+{
+	while(*topic != '\0' && *expected != '\0') {
+		if(*topic++ != *expected++) {
+			return 0;
+		}
+	}
+	return *topic == '\0' && *expected == '\0';
+}
 
 /* mqtt.c NUL-terminates the topic before handing it over, but it is only
  * valid for the duration of this call -- copy it out. */
@@ -52,38 +66,54 @@ static void incoming_publish_cb(void *arg, const char *topic, u32_t tot_len)
 	u32_t	i;
 
 	(void)arg;
-	(void)tot_len;
-
 	for(i = 0; i < (MQTT_UTK_RX_TOPIC_MAX - 1) && topic[i] != '\0'; i++) {
 		rx_topic[i] = topic[i];
 	}
 	rx_topic[i] = '\0';
 
 	rx_len = 0;
-	rx_truncated = 0;
+	rx_expected_len = tot_len;
+	rx_topic_truncated = (topic[i] != '\0');
+	rx_truncated = (tot_len >= MQTT_UTK_RX_DATA_MAX);
 }
 
 static void incoming_data_cb(void *arg, const u8_t *data, u16_t len, u8_t flags)
 {
 	u16_t	i;
+	int	result;
 
 	(void)arg;
 
 	for(i = 0; i < len; i++) {
-		if(rx_len < (MQTT_UTK_RX_DATA_MAX - 1)) {
-			/* The console is a terminal -- keep raw bytes from a
-			 * payload this demo did not publish from scrambling it. */
-			UB c = data[i];
-			rx_data[rx_len++] = (c >= 0x20 && c < 0x7f)? c: '.';
+		if(rx_len < (MQTT_UTK_RX_DATA_MAX - 1) &&
+		   rx_len < rx_expected_len) {
+			rx_data[rx_len++] = data[i];
 		} else {
 			rx_truncated = 1;
 		}
 	}
 
 	if((flags & MQTT_DATA_FLAG_LAST) != 0) {
-		rx_data[rx_len] = '\0';
-		tm_printf((UB*)"mqtt: RX [%s] \"%s\"%s\n", rx_topic, rx_data,
-			  rx_truncated? " (truncated)": "");
+		if(rx_topic_truncated || rx_truncated ||
+		   rx_len != rx_expected_len) {
+			tm_printf((UB*)"mqtt: rejected oversized or incomplete command\n");
+			return;
+		}
+
+		if(!topic_matches(rx_topic, MQTT_COMMAND_TOPIC)) {
+			return;
+		}
+
+		result = buddy1_mqtt_submit_command((const char *)rx_data, rx_len);
+		if(result == 0) {
+			tm_printf((UB*)"mqtt: accepted command\n");
+		} else if(result == BUDDY1_MQTT_REJECTED) {
+			tm_printf((UB*)"mqtt: rejected unknown command payload\n");
+		} else if(result == BUDDY1_MQTT_QUEUE_FULL) {
+			tm_printf((UB*)"mqtt: command queue full; command dropped\n");
+		} else {
+			tm_printf((UB*)"mqtt: command queue error %d\n", result);
+		}
 	}
 }
 
@@ -91,7 +121,7 @@ static void subscribe_done_cb(void *arg, err_t result)
 {
 	(void)arg;
 	if(result == ERR_OK) {
-		tm_printf((UB*)"mqtt: subscribed to " MQTT_TOPIC "\n");
+		tm_printf((UB*)"mqtt: subscribed to " MQTT_COMMAND_TOPIC "\n");
 	} else {
 		tm_printf((UB*)"mqtt: subscribe failed, err=%d\n", (int)result);
 	}
@@ -110,21 +140,73 @@ static void heartbeat_timeout(void *arg)
 	static unsigned int	count = 0;
 	UB			payload[48];
 	int			len;
+	err_t			err;
 
 	(void)arg;
 
 	if(mqtt_client_is_connected(client)) {
-		len = tm_sprintf(payload, (const UB*)"hb %u", count++);
-		tm_printf((UB*)"mqtt: TX [" MQTT_TOPIC "] \"%s\"\n", payload);
-		(void)mqtt_publish(client, MQTT_TOPIC, payload, (u16_t)len,
-				   0 /* qos */, 0 /* retain */,
-				   publish_done_cb, NULL);
+		len = tm_sprintf(payload,
+				 (const UB*)"{\"status\":\"online\",\"seq\":%u}",
+				 count++);
+		if(len > 0 && len < sizeof(payload)) {
+			err = mqtt_publish(client, MQTT_HEARTBEAT_TOPIC, payload,
+					   (u16_t)len, 0 /* qos */, 0 /* retain */,
+					   publish_done_cb, NULL);
+			if(err != ERR_OK) {
+				tm_printf((UB*)"mqtt: heartbeat enqueue failed, err=%d\n",
+					  (int)err);
+			}
+		} else {
+			tm_printf((UB*)"mqtt: heartbeat formatting failed\n");
+		}
 	}
 
 	/* Re-arms itself every call -- mqtt.c's connection callback (below)
 	 * only starts this chain once, on the transition into MQTT_CONNECT_
 	 * ACCEPTED, so there is exactly one heartbeat chain alive at a time. */
 	sys_timeout(MQTT_UTK_HEARTBEAT_MS, heartbeat_timeout, NULL);
+}
+
+static void telemetry_timeout(void *arg)
+{
+	BUDDY1_TELEMETRY	telemetry;
+	UB			payload[192];
+	int			result;
+	int			len;
+	err_t			err;
+
+	(void)arg;
+
+	result = buddy1_mqtt_take_latest_telemetry(&telemetry);
+	if(result == 0 && mqtt_client_is_connected(client)) {
+		len = tm_sprintf(payload,
+			(const UB*)"{\"timestamp_ms\":%u,\"mission_state\":%u,"
+			"\"speed_mm_s\":%d,\"distance_mm\":%u,"
+			"\"line_error\":%d,\"obstacle_distance_mm\":%d,"
+			"\"hump_peak_mm\":%u,\"fault_code\":%u}",
+			telemetry.timestamp_ms, telemetry.mission_state,
+			telemetry.speed_mm_s, telemetry.distance_mm,
+			telemetry.line_error, telemetry.obstacle_distance_mm,
+			telemetry.hump_peak_mm, telemetry.fault_code);
+		if(len <= 0 || len >= sizeof(payload)) {
+			tm_printf((UB*)"mqtt: telemetry formatting failed\n");
+		} else {
+			err = mqtt_publish(client, MQTT_TELEMETRY_TOPIC, payload,
+					   (u16_t)len, 0 /* qos */, 0 /* retain */,
+					   publish_done_cb, NULL);
+			if(err != ERR_OK) {
+				tm_printf((UB*)"mqtt: telemetry enqueue failed, err=%d\n",
+					  (int)err);
+			}
+		}
+	} else if(result != 0 && result != BUDDY1_MQTT_NO_DATA) {
+		tm_printf((UB*)"mqtt: telemetry queue error %d\n", result);
+	}
+
+	/* The queue helper also drains while disconnected, so reconnect never
+	   publishes a backlog of obsolete vehicle state. Its fixed bound keeps
+	   active producers from starving the radio poll task. */
+	sys_timeout(MQTT_UTK_TELEMETRY_MS, telemetry_timeout, NULL);
 }
 
 static void retry_timeout(void *arg)
@@ -150,28 +232,23 @@ static void connection_cb(mqtt_client_t *c, void *arg, mqtt_connection_status_t 
 
 		tm_printf((UB*)"mqtt: connected to " MQTT_BROKER_IP "\n");
 
-		/* Subscribe to the same topic this client publishes to, so every
-		 * heartbeat comes back from the broker and is printed by
-		 * incoming_data_cb(). A matching RX for each TX is end-to-end
-		 * proof of the round trip without needing mosquitto_sub on the
-		 * broker host. Callbacks must be registered before subscribing,
-		 * or the first delivery has nowhere to go. */
+		/* Register receive callbacks before subscribing. Commands are
+		 * validated against a fixed allowlist before entering the app queue. */
 		mqtt_set_inpub_callback(client, incoming_publish_cb,
 					incoming_data_cb, NULL);
 
-		err = mqtt_subscribe(client, MQTT_TOPIC, 0 /* qos */,
+		err = mqtt_subscribe(client, MQTT_COMMAND_TOPIC, 0 /* qos */,
 				     subscribe_done_cb, NULL);
 		if(err != ERR_OK) {
 			tm_printf((UB*)"mqtt: mqtt_subscribe() failed, err=%d\n",
 				  (int)err);
 		}
 
-		/* Drop any chain left over from a previous connection before
-		 * arming a new one. Each reconnect would otherwise add another
-		 * self-perpetuating heartbeat, and every one of them holds a
-		 * MEMP_SYS_TIMEOUT slot until the pool is exhausted. */
+		/* Keep exactly one timer chain for each periodic publisher. */
 		sys_untimeout(heartbeat_timeout, NULL);
 		sys_timeout(MQTT_UTK_HEARTBEAT_MS, heartbeat_timeout, NULL);
+		sys_untimeout(telemetry_timeout, NULL);
+		sys_timeout(MQTT_UTK_TELEMETRY_MS, telemetry_timeout, NULL);
 	} else {
 		/* mqtt_client_connect() reconnects on its own for a dropped
 		 * keepalive; a rejected/never-established connection does not

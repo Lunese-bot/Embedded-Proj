@@ -21,7 +21,7 @@ subsystem, ask its owner or open a pull request for them to review.
 | 2 | *example:* Producer: makes a sample every 300 ms | | | `app_program/subsystem2/` | `testing/subsystem2/` |
 | 3 | *example:* Consumer: collects samples into statistics | | | `app_program/subsystem3/` | `testing/subsystem3/` |
 | 4 | *example:* Monitor: prints reports, pauses the LED | | | `app_program/subsystem4/` | `testing/subsystem4/` |
-| 5 | | | | `app_program/subsystem5/` | `testing/subsystem5/` |
+| 5 | Buddy 1: Wi-Fi/MQTT application interface | | | `app_program/subsystem5/` | `testing/subsystem5/` |
 
 Shared files (`app_program/app_main.c`, `app_program/app.h`, this file)
 are changed only by agreement of the team. The exception is claiming an empty
@@ -121,7 +121,7 @@ task, `cyw43_utk_task` (`lib/libwifi/sysdepend/pico_rp2040/`). **No student
 task may call `cyw43_...`, lwIP or MQTT functions, not even from a
 "WiFi subsystem".** The calls are not safe from any other task, on either core.
 
-What students *can* do:
+What students can do:
 
 - **Read the connection state** from any task, which is always safe:
   ```c
@@ -129,15 +129,14 @@ What students *can* do:
   T_CYW43_UTK_STATUS st;
   cyw43_utk_get_status(&st);   /* st.ready, st.link_status, st.ip_addr, ... */
   ```
-- **Send or receive data over the network** by adding code that *runs
-  inside the service task*. The MQTT client is in
-  `lib/liblwip/sysdepend/pico_rp2040/mqtt_utk.c`. It publishes a heartbeat
-  today. A "cloud / reporting" subsystem would add a kernel object
-  (e.g. a message buffer) that application tasks fill. The MQTT code then
-  reads it with `TMO_POL` (never blocking) and publishes it.
-  Because this changes shared library code, **agree it with the team and
-  the instructor first**, and record it as an interface in section 5.
-  It needs the `NET=lwip MQTT=1` build (README section 3).
+- **Exchange application data with the existing MQTT service** through
+  `app_program/subsystem5/`; application tasks never call lwIP or MQTT
+  directly. Bounded T-Kernel message buffers carry telemetry snapshots to
+  the service and validated commands to the Vehicle Controller. The service
+  drains telemetry without waiting and publishes the newest snapshot every
+  200 ms; disconnected/stale snapshots are discarded rather than replayed.
+  Commands are limited to the exact payloads `start`, `stop`, `pause`, and
+  `resume`. This bridge requires `NET=lwip MQTT=1`.
 
 ## 4. Task priorities
 
@@ -167,7 +166,8 @@ sends to it or waits on it. Agree on the data format before coding.
 | IF-03 | S3 → S4 | message buffer + event flag (owned by S4) | `mbf_summary`, `flg_events` | text line ≤ `S4_SUMMARY_MAX` bytes, then `FLG_BATCH` | *example* |
 | IF-04 | S4 → S3 | shared data under a mutex (owned by S3) | `app_stats`, `mtx_stats` | `APP_STATS`, read only while locked | *example* |
 | IF-05 | S4 → S1 | task control | `tid_led` | `tk_sus_tsk` / `tk_rsm_tsk` / `tk_chg_pri` | *example* |
-| IF-06 | | | | | |
+| IF-06 | Vehicle Controller / sensor tasks → MQTT service | message buffer (owned by S5) | `mbf_telemetry` | `BUDDY1_TELEMETRY` snapshot; bounded queue, drop is returned to sender | Buddy 1 |
+| IF-07 | MQTT service → Vehicle Controller | message buffer (owned by S5) | `mbf_commands` | validated `BUDDY1_COMMAND`; exact payload allowlist | Buddy 1 |
 
 Each interface is tested by at least one integration test
 (`testing/integration/TEST_LOG.md`).
@@ -184,7 +184,7 @@ limit there. The numbers below are the example's usage.
 | Event flag | 16 | | | | 1 | |
 | Mailbox | 12 | | | 1 | | |
 | Mutex | 12 | | | 1 | | |
-| Message buffer | 12 | | | | 1 | |
+| Message buffer | 12 | | | | 1 | 2 |
 | Fixed memory pool | 12 | | 1 | | | |
 | Variable memory pool | 12 | | | | | |
 | Cyclic handler | 12 | 1 | | | | |

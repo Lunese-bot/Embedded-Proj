@@ -136,8 +136,10 @@ subfolders, is compiled automatically.
 - **One folder per student:** `app_program/subsystem1/` … `subsystem5/`.
   Subsystems 1–4 hold a working example, one task each (LED, producer,
   consumer, monitor). Together they use the main micro T-Kernel APIs and
-  pass data between subsystems. Subsystem 5 is an empty template.
-  Replace the examples with your own subsystems.
+  pass data between subsystems. The fifth slot implements Buddy 1's
+  application-facing Wi-Fi/MQTT queues; it does not create a second network
+  task. Replace the examples with your own subsystems as the team integrates
+  the design.
 - `subsystemN.h` is that subsystem's public interface: the object IDs and
   data formats the other subsystems may use.
 - `app.h` holds the definitions shared by the whole team.
@@ -248,8 +250,22 @@ Each option goes through the same steps:
   mailboxes are not make options. They are in `config/config.h` (`CNF_MAX_...`).
 
 The makefile also has `NET=lwip` and `MQTT=1` (TCP/IP and MQTT over WiFi).
-They need the SDK's `lib/lwip` submodule and a `config/wifi_secrets.h`
-(copy `config/wifi_secrets.example.h`). This guide does not cover them.
+They need the SDK's `lib/lwip` submodule and a local
+`config/wifi_secrets.h` copied from `config/wifi_secrets.example.h`.
+
+Buddy 1's application interface lives in `app_program/subsystem5/`.
+Application tasks enqueue `BUDDY1_TELEMETRY` snapshots with
+`subsystem5_publish_telemetry()` and receive allowlisted commands with
+`subsystem5_receive_command()`. The existing `cyw43_utk_task()` alone calls
+lwIP/MQTT; it publishes heartbeat JSON to `robot/group10/heartbeat`,
+telemetry JSON to `robot/group10/telemetry`, and listens on
+`robot/group10/command`. Accepted command payloads are exactly `start`,
+`stop`, `pause`, and `resume`. Queues are bounded; telemetry queue-full
+errors are returned to the producer, and older snapshots are discarded
+rather than replayed after a disconnect. Use `make SMP=1 WIFI=cyw43
+NET=lwip MQTT=1` for this profile. The current MQTT transport is plain TCP,
+so use only on a trusted test network; it is not appropriate for untrusted
+networks or safety-critical remote control.
 
 ---
 
